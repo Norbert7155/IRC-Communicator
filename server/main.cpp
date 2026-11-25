@@ -1,5 +1,7 @@
-#include <cstdio>
-#include <string>
+#include "../common/linia.hpp"
+
+#include <stdio.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -12,7 +14,7 @@ int main() {
 
 
     if (sock == -1) {
-        std::perror("socket");
+        perror("socket");
         return 1;
     }
 
@@ -22,55 +24,63 @@ int main() {
     adresSerwera.sin_addr.s_addr = INADDR_ANY;
 
     if (bind(sock, (sockaddr*)&adresSerwera, sizeof(adresSerwera)) == -1) {
-        std::perror("bind");
+        perror("bind");
         close(sock);
         return 1;
     }
 
     if (listen(sock, 10) == -1) {
-        std::perror("listen");
+        perror("listen");
         close(sock);
         return 1;
     }
 
     int klient = accept(sock, nullptr, nullptr);
     if (klient == -1) {
-        std::perror("accept");
+        perror("accept");
         close(sock);
         return 1;
     }
 
-    std::puts("Klient sie polaczyl");
+    puts("Klient sie polaczyl");
     if (send(klient, powitanie, sizeof(powitanie) - 1, MSG_NOSIGNAL) == -1) {
-        std::perror("send");
+        perror("send");
     }
 
-    std::string daneOczekujace;
+    char daneOczekujace[pojemnoscLinii];
+    size_t liczbaBajtow = 0;
     bool bladWysylania = false;
     while (!bladWysylania) {
-        ssize_t odebrano = recv(klient, bufor, sizeof(bufor), 0);
+        const size_t wolneMiejsce = sizeof(daneOczekujace) - liczbaBajtow;
+        if (wolneMiejsce == 0) {
+            fputs("Wiadomosc klienta jest za dluga.\n", stderr);
+            break;
+        }
+        const size_t doOdczytania = wolneMiejsce < sizeof(bufor) ? wolneMiejsce : sizeof(bufor);
+        const ssize_t odebrano = recv(klient, bufor, doOdczytania, 0);
         if (odebrano == 0) {
             break;
         }
         if (odebrano == -1) {
-            std::perror("recv");
+            perror("recv");
             break;
         }
 
-        daneOczekujace.append(bufor, static_cast<std::size_t>(odebrano));
+        memcpy(daneOczekujace + liczbaBajtow, bufor, odebrano);
+        liczbaBajtow += odebrano;
         while (true) {
-            const auto koniec = daneOczekujace.find("\r\n");
-            if (koniec == std::string::npos) {
+            const size_t dlugoscWiadomosci = znajdzDlugoscLinii(daneOczekujace, liczbaBajtow);
+            if (dlugoscWiadomosci == 0) {
                 break;
             }
 
-            const auto dlugoscWiadomosci = koniec + 2;
-            if (send(klient, daneOczekujace.data(), dlugoscWiadomosci, MSG_NOSIGNAL) == -1) {
-                std::perror("send");
+            if (send(klient, daneOczekujace, dlugoscWiadomosci, MSG_NOSIGNAL) == -1) {
+                perror("send");
                 bladWysylania = true;
                 break;
             }
-            daneOczekujace.erase(0, dlugoscWiadomosci);
+            liczbaBajtow -= dlugoscWiadomosci;
+            memmove(daneOczekujace, daneOczekujace + dlugoscWiadomosci, liczbaBajtow);
         }
     }
 
